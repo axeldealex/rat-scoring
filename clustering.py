@@ -298,8 +298,11 @@ print(root_path)
 ########################################################################
 # LED video analysis
 #
-# analyses video for LED luminance, later used to align video with TTL. Some dropped frames, but general functionality
+# Analyses video for LED luminance, later used to align video with TTL. Some dropped frames, but general functionality
 # is good. Code mostly taken from StackOverflow.
+
+# Video has to be of isolated LED: I personally used Movavi, although others also seem reasonable.
+# Quality of video doesn't have to be great, so use low resolution and file size (saves on rendering time)
 ########################################################################
 
 # Create a VideoCapture object and read from input file
@@ -393,7 +396,8 @@ led_vid_resampled = make_binary(led_vid, 3)
 ########################################################################
 #
 # Realignment
-# Realigns TTL and video signal: based on LED luminance and TTL on/off state, epochs are defined and
+# Realigns TTL and video signal: based on LED luminance and TTL on/off state, epochs are defined and timestamps
+# extracted.
 ########################################################################
 
 # find on-state in the digital signal
@@ -489,11 +493,9 @@ while running:
         running = False
 
 ########################################################################
-#
 # LFP analysis
-#TODO
-# Check if this actually runs
-#
+# Goes over all channels within a recording day and analyses the LFP signal for power within the Delta (1-4Hz) and
+# Theta bands (6-10Hz). Also saves LFP power per tetrode and per area for later use in case of crashing.
 ########################################################################
 
 # starts LFP processing
@@ -556,7 +558,7 @@ for i in range(0, 32):
         # saves calculated powers
         power_per_band_sum[:, :, j-1] = power_per_band
 
-    # averages powers for each channel withing tetrode
+    # averages powers for each channel within tetrode
     power_per_band_tetrode[:, :, i] = np.sum(power_per_band_sum, axis=2) / TETRODE_ELECTRODES
     # empties variable
     power_per_band_sum = np.zeros(shape_power_sum)
@@ -568,6 +570,7 @@ os.chdir("/home/11648775/dataClustering/")
 # save tetrode powers to pickle file
 power_per_band_tetrode_save = np.log10(power_per_band_tetrode)
 
+# dumps LFP power per tetrode for later checking:
 with open('LFP_power_tetrodes.pickle', 'wb') as f:
     pickle.dump(power_per_band_tetrode_save, f)
 
@@ -613,8 +616,10 @@ os.chdir("..")
 
 ########################################################################
 # DLC movement data analysis
-#TODO
-# Need to fix the triangle, have functions but need to apply them
+# Goes over csv created by DeepLabCut to extract movement data: uses frame numbers defined in alignment to extract
+# correct parts of the file. After data has been processed, saves fit object for later use in case of crashes.
+#TODO:
+# change triangle to better working alternative of drive
 ########################################################################
 
 # extracts movement information
@@ -661,7 +666,7 @@ fit_object = np.append(fit_object_lfp, movement_data_processed, axis=1)
 os.chdir("/home/11648775/dataClustering/")
 
 # save tetrode powers to pickle file
-with open('labels.pickle', 'wb') as f:
+with open('fit_object_movement.pickle', 'wb') as f:
     pickle.dump(fit_object, f)
 
 # returns working directory to root
@@ -670,11 +675,13 @@ os.chdir("..")
 os.chdir("..")
 
 ########################################################################
-#
 # Summarising and clustering of data
-#TODO
-# Hope this works!
 #
+# Using the fit_object created earlier, executes a clustering and saves the labels of assigned to each epoch.
+# The labels (hopefully) correspond to REM, NREM, wake and quiet wakefulness.
+
+#TODO
+# verify the validity of the clustering: silhouette analysis and sleep scoring separately to then cross reference.
 ########################################################################
 
 # performs a fit of the data
@@ -683,7 +690,7 @@ gmm = GaussianMixture(n_components=4, init_params='kmeans', verbose=0).fit(fit_o
 # assigns labels to each epoch
 labels = gmm.fit_predict(fit_object)
 
-# saves labels for later use in visualisation
+# saves labels for later use
 # changes working directory
 os.chdir("/home/11648775/dataClustering/")
 
