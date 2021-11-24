@@ -1,3 +1,4 @@
+import pickle
 """
 Created on Sun Aug  3 15:18:38 2014
 @author: Dan Denman and Josh Siegle
@@ -467,13 +468,14 @@ def _get_sorted_channels(folderpath, chprefix='CH', session='0', source='100'):
 
 
 # This is where I start to mess around
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.fft
+import random
 from scipy import signal
 from scipy.integrate import simps
 from math import floor
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
 
 # Constants
 fs = 1000
@@ -499,10 +501,30 @@ def plot_PSD(signal, fs):
     Plots a PSD of a signal with sampling frequency fs
     """
     f, Pxx_den = scipy.signal.welch(signal, fs=fs)
-    plt.semilogy(f, Pxx_den)
+    return plt.semilogy(f, Pxx_den)
 
-    plt.xlabel('frequency [Hz]')
-    plt.ylabel('PSD [V**2/Hz]')
+def save_PSD(signal, title, xlab='frequency [Hz]', ylab='PSD [V**2/Hz]'):
+    """"
+    Plots PSD in 0-50Hz range
+    """
+    f, Pxx_den = scipy.signal.welch(signal, fs=fs)
+    plt.semilogy(f[0:22], Pxx_den[0:22])
+
+    plt.xlabel(xlab)
+    plt.ylabel(ylab)
+    plt.title(title)
+    plt.savefig(fname=title)
+    plt.close()
+
+def save_plot(signal, title, xlab="Time (ms)", ylab="Amplitude (mV)"):
+    x = (range(0, len(signal)))
+
+    plt.xlabel(xlab)
+    plt.ylabel(ylab)
+    plt.title(title)
+    plt.plot(x, signal)
+    plt.savefig(fname=title)
+    plt.close()
 
 def plot_scatter(x, y, labels, title, xlabel, ylabel):
     """"
@@ -571,38 +593,15 @@ def epoch_welch(epochs, fs, nperseg, bands=[(DELTA_LOW, DELTA_HIGH), (THETA_LOW,
     return frequencies, powers, band_power
 
 
-def resampling(signal):
+def resampling(signal, factor=FACTOR):
     size = len(signal)
 
     print('Starting resampling...')
-    data_resampled = scipy.signal.resample(signal, round(size / FACTOR))
+    data_resampled = scipy.signal.resample(signal, round(size / factor))
 
     return data_resampled
 
-
-def epoch_remove(data_power):
-    print('Removing bad epochs...')
-    for i in range(len(data_power[0, :])):
-        std = np.std(power_per_band[:, i])
-        mean = np.mean(power_per_band[:, i])
-        bound_lower = mean - STD_ALLOWED * std
-        bound_upper = mean + STD_ALLOWED * std
-        # bound_upper = mean
-
-        remove_list = []
-        for k in range(len(data_power[:, 0])):  # this is very inefficient, use numpy.where()
-            if data_power[k, i] > bound_upper or data_power[k, i] < bound_lower:
-                # debugging statement
-                print(f'{data_power[k, i]} is outside {bound_lower}{bound_upper}')
-                remove_list.append(k)
-
-    print(f'{len(remove_list)} out of {len(data_power[:, 0])} epochs removed.')
-    data_power = np.delete(data_power, remove_list, 0)
-    print('Removed bad epochs.')
-    return data_power
-
-
-def analyse(filepath, loaded=False):
+def analyse(filepath, loaded=False, resampled=False):
     """"
     Performs all analysis needed given a filepath.
     loaded indicates whether filepath is a string or an array of points.
@@ -615,10 +614,13 @@ def analyse(filepath, loaded=False):
         data = filepath
 
     # downsamples data
-    try:
-        data_downsampled = resampling(data)
-    except TypeError:
-        raise Exception('Check what gets passed to the analyse function')
+    if not resampled:
+        try:
+            data_downsampled = resampling(data)
+        except TypeError:
+            raise Exception('Check what gets passed to the analyse function')
+    else:
+        data_downsampled = data
 
     # creates and applies filter
     sos = filter_design(17, fs=fs)
@@ -632,7 +634,6 @@ def analyse(filepath, loaded=False):
     freqs, powers, power_per_band = epoch_welch(epochs, fs=fs, nperseg=NPERSEG)
 
     return power_per_band
-
 
 def channel_average(filepaths):
     """
@@ -651,60 +652,159 @@ def channel_average(filepaths):
     data = data / len(filepaths)
     return data
 
+def average_tetrode(signals):
+    n_channels = len(signals[0, :])
+    tetrode_average = (np.sum(signals, axis=1) / n_channels)
 
-# LFP data
-filepath = [r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH33_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH34_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH35_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH36_2.continuous"]
+    return tetrode_average
 
-data_averaged = channel_average(filepath)
-# analyses data
-power_per_band = analyse(data_averaged, loaded=True)
 
-# loads in second channel
-filepath = [r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH29_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH30_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH31_2.continuous",
-            r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH32_2.continuous"]
+def filepath_creation(n_channel, type=1):
+    if type == 1:
+        file_extension = "100_CH" + str(n_channel)
+    elif type == 2:
+        file_extension = "100_" + str(n_channel + 20)
+    else:
+        file_extension = "100_CH" + str(n_channel) + "_2"
 
-# appending results of second channel
-power_per_band = np.append(power_per_band, analyse(channel_average(filepath), loaded=True), axis=1)
-# power_per_band = np.append(power_per_band, analyse(filepath), axis=1)
+    file_extension = file_extension + ".continuous"
+    return file_extension
 
-# appending results of third channel
-filepath = r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH1_2.continuous"
-power_per_band = np.append(power_per_band, analyse(filepath), axis=1)
+# Prepare script for cluster
+main_path = 'data/jpatriota/'
 
-# fourth channel
-filepath = r"C:\Users\Alex\Documents\Studie\UVA\Stage\LFP_data\100_CH128_2.continuous"
-power_per_band = np.append(power_per_band, analyse(filepath), axis=1)
+path_day1 = ["1.Habituation/Habituation/2020-11-13_01-23-17/Record Node 117",
+             "1.Habituation/Habituation/2020-11-13_01-23-17/Record Node 125",
+             "1.Habituation/Habituation/r12 sleep_hab/rec raw/2020-11-13_04-49-07/Record Node 117"]
 
-# take log of powers
-power_per_band = np.log10(power_per_band)
+# convention: 100_CH#.cont
+path_day2 = ["2.Fear conditioning/Fear conditioning/fc_sleep/raw/2020-11-14_02-09-18/Record Node 117",
+            "2.Fear conditioning/Fear conditioning/Fear conditioning awake/raw/2020-11-14_00-59-06/Record Node 117"]
 
-# remove epochs with deviant power
-# power_per_band = epoch_remove(power_per_band)
+# convention: 100_#.continuous
+path_day3 = ["3.Probe test/probe test/Probe fear/probe awake/raw/2020-11-15_00-38-02/Record Node 117",
+             "3.Probe test/probe test/Probe slee/raw/2020-11-15_02-16-08/Record Node 117"]
 
-# gaussian model
-gmm = GaussianMixture(n_components=4, init_params='kmeans', verbose=1).fit(power_per_band)
+# convention: 100_#.continuous
+path_day4 = ["4.Extinction training/Extinction learning/Extinction learning awake/raw/2020-11-16_00-33-35/Record Node 117",
+            "4.Extinction training/Extinction learning/Extinction learning sleep/raw/2020-11-16_03-21-15/Record Node 117"]
 
-# assign labels based on gaussian model
-labels = gmm.fit_predict(power_per_band)
+# convention: 100_TYPE#.continuous
+path_day5 = ["5.Extinction test/extinction probe awake/raw/2020-11-17_00-44-46/Record Node 117",
+            "5.Extinction test/extinction probe sleep/raw/2020-11-17_02-01-55/Record Node 117"]
 
-# makes scatter plots of data, currently dimensions 1 to 4
-x = power_per_band[:, 0]
-y = power_per_band[:, 1]
+path_day1 = list(path_day1.pop(-1))
+# makes list of all data paths
+data_paths = [path_day1, path_day2, path_day3, path_day4, path_day5]
+ch_channels = list(range(21, 129))
 
-plot_scatter(x, y, labels,
-             title='log Delta & Theta of auditory cortex, channel 33-36',
-             xlabel='Delta (log)', ylabel='Theta (log)')
-plt.show()
+# iteration variable
+count = 2
 
-x = power_per_band[:, 2]
-y = power_per_band[:, 3]
+# preps list for later saving
+power_spectrums = list()
 
-plot_scatter(x, y, labels,
-             title='log Delta & Theta of auditory cortex, channel 29-32',
-             xlabel='Delta (log)', ylabel='Theta (log)')
-plt.show()
+# checking paths for running on the cluster
+base_path = os.path.abspath(os.curdir)
+print(base_path)
+os.chdir("..")
+os.chdir("..")
+root_path = os.path.abspath(os.curdir)
+print(root_path)
+
+# loop over every recording day
+for days in data_paths:
+    # loop over every recording of interest
+    for recording in days:
+        # set variable for correct filepath creation
+        if count in [0, 3, 4, 9, 10]:
+            type = 1
+        elif count in [1, 5, 6, 7, 8]:
+            type = 2
+        else:
+            type = 3
+
+        # iterate counting for proper loading of channels
+        count = count + 1
+
+        if recording == str(1):
+            root_filepath = main_path + "1.Habituation/Habituation/r12 sleep_hab/rec raw/2020-11-13_04-49-07/Record Node 117"
+        else:
+            root_filepath = main_path + recording
+        powers = np.array([])
+
+        # loops over all tetrodes
+        for i in range(0, 32): #(0,32)
+            # loops over each channel in tetrode
+            for j in range(1, 5): # for j in range(1,5):
+                # gets exact channel number
+                n_channel = i * 4 + j
+
+                # creates full filepath
+                extension = filepath_creation(n_channel=n_channel, type=type)
+                filepath = root_filepath + '/' + extension
+
+                # loads in signal
+                data = load(filepath)
+                LFP_signal = data['data']
+
+                print(f"completed loading of {filepath}")
+
+                # resamples channel
+                LFP_data = resampling(LFP_signal)
+
+                # Checks for the existence of a plots folder
+                plot_filepath = root_filepath + '/' + 'plots'
+                if not os.path.isdir(plot_filepath):
+                    os.makedirs(plot_filepath)
+
+                # saves a power spectrum and basic plot in specified location
+                os.chdir(plot_filepath)
+                file_title = extension.replace('.continuous', '') + '_PSD'
+                save_PSD(LFP_signal, title=file_title)
+
+                signal_len = len(LFP_signal)
+                plot_start = random.randint(0, signal_len - 100 * fs)
+
+                file_title = extension.replace('.continuous', '') + '_plot'
+                save_plot(signal=LFP_signal[plot_start:plot_start + 15 * fs], title=file_title)
+                # changes working directory back to root
+                os.chdir(root_path)
+
+""""
+                # perform power analysis of theta and delta for each channel
+                power = analyse(LFP_signal, loaded=True)
+
+                # data comes out of analyse in shape (n_epochs, n_band)
+                if powers.size > 0:
+                    powers = np.append(powers, power, axis=1)
+                else:
+                    powers = power
+
+"""
+
+
+""""
+                # adds signals together
+                if LFP_data.size > 0:
+                    # trims signal if signals don't match within a tetrode
+                    try:
+                        LFP_data = LFP_data + LFP_signal
+                    except ValueError:
+                        if LFP_data.shape[0] > LFP_signal.shape[0]:
+                            LFP_data = LFP_data[:LFP_signal.shape[0], :]
+                            LFP_data = LFP_data + LFP_signal
+                        else:
+                            LFP_signal = LFP_signal[:LFP_data.shape[0], :]
+                            LFP_data = LFP_data + LFP_signal
+                else:
+                    LFP_data = LFP_signal
+"""
+
+#        power_spectrums.append(powers)
+
+os.chdir(base_path)
+
+# save results to pickle file
+with open('LFP_power.pickle', 'wb') as f:
+    pickle.dump(power_spectrums, f)
