@@ -304,9 +304,9 @@ print(root_path)
 # Video has to be of isolated LED: I personally used Movavi, although others also seem reasonable.
 # Quality of video doesn't have to be great, so use low resolution and file size (saves on rendering time)
 ########################################################################
-
+os.chdir(r"C:\Users\Alex\PycharmProjects\pythonProject")
 # Create a VideoCapture object and read from input file
-video_path = "/data/jpatriota/2.Fear conditioning/Fear conditioning/fc_sleep/fear_sleepr120.avi"
+video_path = "extinction_awaker120LED.avi"
 
 cap = cv2.VideoCapture(video_path)
 # Check if camera opened successfully
@@ -357,8 +357,7 @@ led_vid, LED_on = extract_led_status(luminance_array, n_elements_vid, bound_high
 print("Finished extracting LED data")
 
 # TTL data is 1000Hz after resampling
-ttl_path = "/data/jpatriota/2.Fear conditioning/Fear conditioning/fc_sleep/raw/2020-11-14_02-09-18" \
-           "/Record Node 117/100_ADC3.continuous"
+ttl_path = "100_3.continuous"
 
 print("Started digital TTL loading")
 ttl_digital = TTL_analysis(ttl_path)
@@ -394,7 +393,6 @@ led_vid_resampled = make_binary(led_vid, 3)
 
 
 ########################################################################
-#
 # Realignment
 # Realigns TTL and video signal: based on LED luminance and TTL on/off state, epochs are defined and timestamps
 # extracted.
@@ -499,7 +497,7 @@ while running:
 ########################################################################
 
 # starts LFP processing
-LFP_path = "/data/jpatriota/2.Fear conditioning/Fear conditioning/fc_sleep/raw/2020-11-14_02-09-18/Record Node 117/"
+LFP_path = "/data/jpatriota/4.Extinction training/Extinction learning/Extinction learning awake/raw/2020-11-16_00-33-35/Record Node 117/"
 
 # sets variables needed for loop
 indexes_flag = False
@@ -521,7 +519,7 @@ for i in range(0, 32):
         n_channel = i * 4 + j
 
         # creates full filepath
-        extension = filepath_creation(n_channel, type=1)
+        extension = filepath_creation(n_channel, type=2)
         channel_filepath = LFP_path + extension
 
         # loads in signal
@@ -538,7 +536,7 @@ for i in range(0, 32):
             LFP_timestamps = np.linspace(0, len(LFP_signal) / 1000, len(LFP_signal) + 1)
             timestamps_flag = True
 
-            # need to round ot 3 decimals for epoch_split to function correctly
+            # need to round to 3 decimals for epoch_split to function correctly
             for k in range(0, len(LFP_timestamps)):
                 LFP_timestamps[k] = round(LFP_timestamps[k], 3)
 
@@ -571,8 +569,13 @@ os.chdir("/home/11648775/dataClustering/")
 power_per_band_tetrode_save = np.log10(power_per_band_tetrode)
 
 # dumps LFP power per tetrode for later checking:
-with open('LFP_power_tetrodes.pickle', 'wb') as f:
+with open('LFP_power_tetrodes_day4awake.pickle', 'wb') as f:
     pickle.dump(power_per_band_tetrode_save, f)
+
+# dumps indexes of LFP signals per epoch
+if indexes_flag:
+    with open('epoch_timestamps_day4awake.pickle', 'wb') as f:
+        pickle.dump(epoch_indexes)
 
 del power_per_band_tetrode_save
 
@@ -606,7 +609,7 @@ fit_object_lfp = np.log10(fit_object_lfp)
 os.chdir("/home/11648775/dataClustering/")
 
 # save tetrode powers to pickle file
-with open('LFP_power_areas.pickle', 'wb') as f:
+with open('LFP_power_areas_day4awake.pickle', 'wb') as f:
     pickle.dump(fit_object_lfp, f)
 
 # returns working directory to root
@@ -619,11 +622,11 @@ os.chdir("..")
 # Goes over csv created by DeepLabCut to extract movement data: uses frame numbers defined in alignment to extract
 # correct parts of the file. After data has been processed, saves fit object for later use in case of crashes.
 #TODO:
-# change triangle to better working alternative of drive
+# change triangle to better working alternative of drive/back combined measure
 ########################################################################
 
 # extracts movement information
-movement_filepath = "/data/jpatriota/2.Fear conditioning/Fear conditioning/fc_sleep/fear_sleepr120DLC_resnet50_DriveNetwork2Dec15shuffle1_1030000.csv"
+movement_filepath = "/data/jpatriota/4.Extinction training/Extinction learning/Extinction learning awake/extinction_awaker120DLC_resnet50_DriveNetwork2Dec15shuffle1_1030000.csv"
 MIN_MOVEMENT = 2
 movement_conf, movement_data = analyze_dlc_data(movement_filepath, type="csv")
 
@@ -659,6 +662,10 @@ for i in range(0, len(epoch_frames_all)):
     movement_data_processed[i, 0] = sum(back_data[start_frame: end_frame]) / len_epoch
     movement_data_processed[i, 1] = sum(drive_movement[start_frame: end_frame]) / len_epoch
 
+# takes average of drive and back
+movement_data_processed = (np.nansum(movement_data_processed, axis=1) / 2)
+
+# appends to fit object
 fit_object = np.append(fit_object_lfp, movement_data_processed, axis=1)
 
 # saves fit object
@@ -666,37 +673,8 @@ fit_object = np.append(fit_object_lfp, movement_data_processed, axis=1)
 os.chdir("/home/11648775/dataClustering/")
 
 # save tetrode powers to pickle file
-with open('fit_object_movement.pickle', 'wb') as f:
+with open('fit_object_movement_day4awake.pickle', 'wb') as f:
     pickle.dump(fit_object, f)
-
-# returns working directory to root
-os.chdir("..")
-os.chdir("..")
-os.chdir("..")
-
-########################################################################
-# Summarising and clustering of data
-#
-# Using the fit_object created earlier, executes a clustering and saves the labels of assigned to each epoch.
-# The labels (hopefully) correspond to REM, NREM, wake and quiet wakefulness.
-
-#TODO
-# verify the validity of the clustering: silhouette analysis and sleep scoring separately to then cross reference.
-########################################################################
-
-# performs a fit of the data
-gmm = GaussianMixture(n_components=4, init_params='kmeans', verbose=0).fit(fit_object)
-
-# assigns labels to each epoch
-labels = gmm.fit_predict(fit_object)
-
-# saves labels for later use
-# changes working directory
-os.chdir("/home/11648775/dataClustering/")
-
-# save labels to pickle file
-with open('labels.pickle', 'wb') as f:
-    pickle.dump(labels, f)
 
 # returns working directory to root
 os.chdir("..")
